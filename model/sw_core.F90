@@ -104,7 +104,7 @@
 !>@brief The subroutine 'c_sw' performs a half-timestep advance of the C-grid winds.
    subroutine c_sw(delpc, delp, ptc, pt, u,v, w, uc,vc, ua,va, wc,  &
                    ut, vt, divg_d, nord, dt2, hydrostatic, dord4, &
-                   bd, gridstruct, flagstruct)
+                   bd, gridstruct, flagstruct, upd_dt, vpd_dt)
 
       type(fv_grid_bounds_type), intent(IN) :: bd
       real, intent(INOUT), dimension(bd%isd:bd%ied,  bd%jsd:bd%jed+1) :: u, vc
@@ -119,8 +119,13 @@
       logical, intent(IN) :: dord4
       type(fv_grid_type),  intent(IN), target :: gridstruct
       type(fv_flags_type), intent(IN), target :: flagstruct
+      real, intent(IN), dimension(bd%isd:bd%ied+1,  bd%jsd:bd%jed) :: vpd_dt
+      real, intent(IN), dimension(bd%isd:bd%ied,bd%jsd:bd%jed+1) :: upd_dt
 
 ! Local:
+      real, dimension(bd%isd:bd%ied+1,  bd%jsd:bd%jed) :: upc_dt
+      real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed+1) :: vpc_dt
+      real, dimension(bd%isd:bd%ied,  bd%jsd:bd%jed) :: upa_dt, vpa_dt, upt_dt, vpt_dt
       logical:: sw_corner, se_corner, ne_corner, nw_corner
       real, dimension(bd%is-1:bd%ie+1,bd%js-1:bd%je+1):: vort, ke
       real, dimension(bd%is-1:bd%ie+2,bd%js-1:bd%je+1):: fx, fx1, fx2
@@ -499,15 +504,18 @@
          enddo
       endif
 
+      call d2a2c_vect(upd_dt, vpd_dt, upa_dt, vpa_dt, upc_dt, vpc_dt, upt_dt, vpt_dt, .true., gridstruct, bd, &
+                      npx, npy, gridstruct%bounded_domain, flagstruct%grid_type)
+
 ! Update time-centered winds on the C-Grid
       do j=js,je
          do i=is,iep1
-            uc(i,j) = uc(i,j) + fy1(i,j)*fy(i,j) + gridstruct%rdxc(i,j)*(ke(i-1,j)-ke(i,j))
+            uc(i,j) = uc(i,j) + fy1(i,j)*fy(i,j) + gridstruct%rdxc(i,j)*(ke(i-1,j)-ke(i,j)) + dt2*(1-flagstruct%phys_decenter)*upc_dt(i,j)
          enddo
       enddo
       do j=js,jep1
          do i=is,ie
-            vc(i,j) = vc(i,j) - fx1(i,j)*fx(i,j) + gridstruct%rdyc(i,j)*(ke(i,j-1)-ke(i,j))
+            vc(i,j) = vc(i,j) - fx1(i,j)*fx(i,j) + gridstruct%rdyc(i,j)*(ke(i,j-1)-ke(i,j)) + dt2*(1-flagstruct%phys_decenter)*vpc_dt(i,j)
          enddo
       enddo
 
@@ -525,7 +533,8 @@
                    zvir, sphum, nq, q, k, km, inline_q,  &
                    dt, hord_tr, hord_mt, hord_vt, hord_tm, hord_dp, nord,   &
                    nord_v, nord_w, nord_t, dddmp, d2_bg, d4_bg, damp_v, damp_w, &
-                   damp_t, d_con, hydrostatic, gridstruct, flagstruct, bd)
+                   damp_t, d_con, hydrostatic, gridstruct, flagstruct, bd, &
+                   upd_dt, vpd_dt, tp_dt, qp_dt)
 
       integer, intent(IN):: hord_tr, hord_mt, hord_vt, hord_tm, hord_dp
       integer, intent(IN):: nord   !< nord=1 divergence damping; (del-4) or 3 (del-8)
@@ -543,7 +552,11 @@
       real, intent(INOUT), dimension(bd%isd:      ,  bd%jsd:      ):: w, q_con
       real, intent(INOUT), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: u, vc
       real, intent(INOUT), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: v, uc
+      real, intent(IN), dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1):: upd_dt
+      real, intent(IN), dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ):: vpd_dt
       real, intent(INOUT):: q(bd%isd:bd%ied,bd%jsd:bd%jed,km,nq)
+      real, intent(IN):: tp_dt(bd%isd:bd%ied,bd%jsd:bd%jed)
+      real, intent(IN):: qp_dt(bd%isd:bd%ied,bd%jsd:bd%jed,km,nq)
       real, intent(OUT),   dimension(bd%isd:bd%ied,  bd%jsd:bd%jed)  :: delpc, ptc
       real, intent(OUT),   dimension(bd%is:bd%ie,bd%js:bd%je):: heat_source
       real, intent(OUT),   dimension(bd%is:bd%ie,bd%js:bd%je):: diss_est
@@ -1027,7 +1040,7 @@
 #ifdef SW_DYNAMICS
               ptc(i,j) = pt(i,j)
 #else
-              pt(i,j) = (pt(i,j)*wk(i,j) +               &
+              pt(i,j) = ((pt(i,j)+(1.0-flagstruct%phys_decenter)*dt*tp_dt(i,j))*wk(i,j) +               &
                         (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
 #endif
            enddo
@@ -1038,7 +1051,7 @@
                          mfx=fx, mfy=fy, mass=delp, nord=nord_t, damp_c=damp_t)
            do j=js,je
               do i=is,ie
-                 q(i,j,k,iq) = (q(i,j,k,iq)*wk(i,j) +               &
+                 q(i,j,k,iq) = ((q(i,j,k,iq)+(1.0-flagstruct%phys_decenter)*dt*qp_dt(i,j,k,iq))*wk(i,j) +               &
                          (gx(i,j)-gx(i+1,j)+gy(i,j)-gy(i,j+1))*rarea(i,j))/delp(i,j)
               enddo
            enddo
@@ -1501,12 +1514,12 @@
                   xfx_adv,yfx_adv, gridstruct, bd, ra_x, ra_y, flagstruct%lim_fac)
     do j=js,je+1
        do i=is,ie
-          u(i,j) = vt(i,j) + ke(i,j) - ke(i+1,j) + fy(i,j)
+          u(i,j) = vt(i,j) + ke(i,j) - ke(i+1,j) + fy(i,j) + (1.0-flagstruct%phys_decenter)*dt*upd_dt(i,j)
        enddo
     enddo
     do j=js,je
        do i=is,ie+1
-          v(i,j) = ut(i,j) + ke(i,j) - ke(i,j+1) - fx(i,j)
+          v(i,j) = ut(i,j) + ke(i,j) - ke(i,j+1) - fx(i,j) + (1.0-flagstruct%phys_decenter)*dt*vpd_dt(i,j)
        enddo
     enddo
 

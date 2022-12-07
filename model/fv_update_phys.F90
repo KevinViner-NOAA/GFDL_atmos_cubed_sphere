@@ -163,6 +163,7 @@ module fv_update_phys_mod
 
 ! Tendencies from Physics:
     real, intent(inout), dimension(isd:ied,jsd:jed,npz):: u_dt, v_dt
+    real, dimension(isd:ied,jsd:jed,npz):: u_dt_tmp, v_dt_tmp
     real, intent(inout):: t_dt(is:ie,js:je,npz)
     real, intent(inout), optional :: q_dt(is:ie,js:je,npz,nq)
     type(phys_diag_type), intent(inout) :: phys_diag
@@ -200,6 +201,9 @@ module fv_update_phys_mod
 
     integer, intent(IN) :: npx, npy, npz
 
+    logical, save :: first=.true.
+    real :: phys_decenter_sv
+   
 !***********
 ! Haloe Data
 !***********
@@ -233,6 +237,11 @@ module fv_update_phys_mod
     logical, dimension(nq) :: conv_vmr_mmr
     real                   :: adj_vmr(is:ie,js:je,npz)
     character(len=32)      :: tracer_units, tracer_name
+
+    if(first)then
+      phys_decenter_sv = flagstruct%phys_decenter
+      flagstruct%phys_decenter = 1.0
+    endif
 
     cv_air = cp_air - rdgas ! = rdgas * (7/2-1) = 2.5*rdgas=717.68
 
@@ -439,7 +448,7 @@ module fv_update_phys_mod
             call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
                           ice_wat, snowwat, graupel, hailwat, q, qc, cvm, pt(is:ie,j,k) )
             do i=is,ie
-               pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt*con_cp/cvm(i)
+               pt(i,j,k) = pt(i,j,k) + flagstruct%phys_decenter*t_dt(i,j,k)*dt*con_cp/cvm(i)
             enddo
          enddo
       else
@@ -450,7 +459,7 @@ module fv_update_phys_mod
                               ice_wat, snowwat, graupel, hailwat, q, qc, cvm, pt(is:ie,j,k) )
                 do i=is,ie
                    delz(i,j,k) = delz(i,j,k) / pt(i,j,k)
-                   pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt*con_cp/cvm(i)
+                   pt(i,j,k) = pt(i,j,k) + flagstruct%phys_decenter*t_dt(i,j,k)*dt*con_cp/cvm(i)
                    delz(i,j,k) = delz(i,j,k) * pt(i,j,k)
                 enddo
              enddo
@@ -459,7 +468,7 @@ module fv_update_phys_mod
             if (nwat == 0) then
                do j=js,je
                   do i=is,ie
-                     pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*gama_dt
+                     pt(i,j,k) = pt(i,j,k) + flagstruct%phys_decenter*t_dt(i,j,k)*gama_dt
                   enddo
                enddo
             else
@@ -467,7 +476,7 @@ module fv_update_phys_mod
                   call moist_cv(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
                                 ice_wat, snowwat, graupel, hailwat, q, qc, cvm, pt(is:ie,j,k))
                   do i=is,ie
-                     pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt*con_cp/cvm(i)
+                     pt(i,j,k) = pt(i,j,k) + flagstruct%phys_decenter*t_dt(i,j,k)*dt*con_cp/cvm(i)
                   enddo
                enddo
             endif
@@ -740,7 +749,10 @@ module fv_update_phys_mod
      enddo
     endif !regional
 !
-    call update_dwinds_phys(is, ie, js, je, isd, ied, jsd, jed, dt, u_dt, v_dt, u, v, gridstruct, npx, npy, npz, domain)
+    u_dt_tmp = flagstruct%phys_decenter*u_dt
+    v_dt_tmp = flagstruct%phys_decenter*v_dt
+    call update_dwinds_phys(is, ie, js, je, isd, ied, jsd, jed, dt, u_dt_tmp, v_dt_tmp, u, v, gridstruct, npx, npy, npz, domain)
+
  endif
                                                     call timing_off(' Update_dwinds')
 #ifdef GFS_PHYS
@@ -769,6 +781,11 @@ module fv_update_phys_mod
      enddo
      enddo
      enddo
+  endif
+
+  if(first)then
+    flagstruct%phys_decenter = phys_decenter_sv
+    first=.false.
   endif
 
   end subroutine fv_update_phys

@@ -549,6 +549,13 @@ module fv_arrays_mod
    integer :: k_split = 1   !< Number of vertical remappings per dt_atmos (physics timestep).
                             !< 1 by default.
 
+ 
+   real :: phys_decenter = 1.0 !< Average physics tendencies across the time
+                               !< step. Default is 1.0 which applies full
+                               !< tendencies at the end of the time step. A
+                               !<value of 0.50 is recommended for higher
+                               !<accuracy.
+
    logical :: use_logp = .false.  !< Enables a variant of the Lin pressure-gradient force
                                   !< algorithm, which uses the logarithm of pressure instead
                                   !< of the Exner function (as in \cite lin1997explicit). This yields

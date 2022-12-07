@@ -300,6 +300,7 @@ module fv_control_mod
      ! Default
      integer , pointer :: m_split
      integer , pointer :: k_split
+     real    , pointer :: phys_decenter
      logical , pointer :: use_logp
 
      integer , pointer :: q_split
@@ -867,6 +868,7 @@ module fv_control_mod
        fhouri                        => Atm%flagstruct%fhouri
        m_split                       => Atm%flagstruct%m_split
        k_split                       => Atm%flagstruct%k_split
+       phys_decenter                 => Atm%flagstruct%phys_decenter
        use_logp                      => Atm%flagstruct%use_logp
        q_split                       => Atm%flagstruct%q_split
        print_freq                    => Atm%flagstruct%print_freq
@@ -1054,7 +1056,7 @@ module fv_control_mod
 
        namelist /fv_core_nml/npx, npy, ntiles, npz, npz_type, fv_eta_file, npz_rst, layout, io_layout, ncnst, nwat,  &
             use_logp, p_fac, a_imp, k_split, n_split, m_split, q_split, print_freq, write_3d_diags, &
-            do_schmidt, do_cube_transform, &
+            do_schmidt, do_cube_transform, phys_decenter, &
             hord_mt, hord_vt, hord_tm, hord_dp, hord_tr, shift_fac, stretch_fac, target_lat, target_lon, &
             kord_mt, kord_wz, kord_tm, kord_tr, fv_debug, fv_land, nudge, do_sat_adj, do_inline_mp, do_f3d, &
             external_ic, read_increment, ncep_ic, nggps_ic, hrrrv3_ic, ecmwf_ic, use_new_ncep, use_ncep_phy, fv_diag_ic, &

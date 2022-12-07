@@ -279,6 +279,7 @@ character(len=20)   :: mod_name = 'fvGFS/atmosphere_mod'
 
 !---dynamics tendencies for use in fv_subgrid_z and during fv_update_phys
   real, allocatable, dimension(:,:,:)   :: u_dt, v_dt, t_dt, qv_dt
+  real, allocatable, dimension(:,:,:,:) :: qp_dt
   real, allocatable                     :: pref(:,:), dum1d(:)
 
   logical :: first_diag = .true.
@@ -448,7 +449,15 @@ contains
    allocate( u_dt(isd:ied,jsd:jed,npz), &
              v_dt(isd:ied,jsd:jed,npz), &
              t_dt(isc:iec,jsc:jec,npz), &
-             qv_dt(isc:iec,jsc:jec,npz) )
+             qv_dt(isc:iec,jsc:jec,npz),&
+             qp_dt(isc:iec,jsc:jec,npz,nq))
+
+   u_dt = 0.0
+   v_dt = 0.0
+   t_dt = 0.0
+   qv_dt = 0.0
+   qp_dt = 0.0
+
 !--- allocate pref
    allocate(pref(npz+1,2), dum1d(npz+1))
 
@@ -709,7 +718,7 @@ contains
                       Atm(n)%gridstruct,  Atm(n)%flagstruct,                    &
                       Atm(n)%neststruct,  Atm(n)%idiag, Atm(n)%bd,              &
                       Atm(n)%parent_grid, Atm(n)%domain,Atm(n)%diss_est,        &
-                      Atm(n)%inline_mp)
+                      Atm(n)%inline_mp,u_dt,v_dt,t_dt,qp_dt)
 
      call timing_off('fv_dynamics')
 
@@ -736,6 +745,7 @@ contains
 ! because of this, it will need to be zeroed out after the diagnostic is calculated
     t_dt(:,:,:)   = Atm(n)%pt(isc:iec,jsc:jec,:)
     qv_dt(:,:,:)  = Atm(n)%q (isc:iec,jsc:jec,:,sphum)
+    qp_dt(:,:,:,:) = 0.
 
     rdt = 1./dt_atmos
 
@@ -829,7 +839,7 @@ contains
    call fv_end(Atm, mygrid, restart_endfcst)
    deallocate (Atm)
 
-   deallocate( u_dt, v_dt, t_dt, qv_dt, pref, dum1d )
+   deallocate( u_dt, v_dt, t_dt, qv_dt, qp_dt, pref, dum1d )
 
  end subroutine atmosphere_end
 
@@ -1606,7 +1616,7 @@ contains
 !--- put u/v tendencies into haloed arrays u_dt and v_dt
 !$OMP parallel do default (none) &
 !$OMP              shared (rdt, n, nq, dnats, npz, ncnst, nwat, mygrid, u_dt, v_dt, t_dt,&
-!$OMP                      Atm, IPD_Data, Atm_block, sphum, liq_wat, rainwat, ice_wat,   &
+!$OMP                      qp_dt, Atm, IPD_Data, Atm_block, sphum, liq_wat, rainwat, ice_wat,   &
 #ifdef MULTI_GASES
 !$OMP                      num_gas,                                                      &
 #endif
@@ -1642,6 +1652,8 @@ contains
          v_dt(i,j,k1) = v_dt(i,j,k1) + (IPD_Data(nb)%Stateout%gv0(ix,k) - IPD_Data(nb)%Statein%vgrs(ix,k)) * rdt
 !         t_dt(i,j,k1) = (IPD_Data(nb)%Stateout%gt0(ix,k) - IPD_Data(nb)%Statein%tgrs(ix,k)) * rdt
          t_dt(i,j,k1) = t_dt(i,j,k1) + (IPD_Data(nb)%Stateout%gt0(ix,k) - IPD_Data(nb)%Statein%tgrs(ix,k)) * rdt
+         qp_dt(i,j,k1,:) = (IPD_Data(nb)%Stateout%gq0(ix,k,:)-IPD_Data(nb)%Statein%qgrs(ix,k,:)) * rdt
+
 ! SJL notes:
 ! ---- DO not touch the code below; dry mass conservation may change due to 64bit <-> 32bit conversion
 ! GFS total air mass = dry_mass + water_vapor (condensate excluded)
@@ -1653,7 +1665,9 @@ contains
          else
            q0 = IPD_Data(nb)%Statein%prsi(ix,k+1) - IPD_Data(nb)%Statein%prsi(ix,k)
          endif
-         qwat(1:nq_adv) = q0*IPD_Data(nb)%Stateout%gq0(ix,k,1:nq_adv)
+         qwat(1:nq_adv) = q0*(IPD_Data(nb)%Statein%qgrs(ix,k,1:nq_adv) + Atm(n)%flagstruct%phys_decenter* &
+                             (IPD_Data(nb)%Stateout%gq0(ix,k,1:nq_adv) - &
+                              IPD_Data(nb)%Statein%qgrs(ix,k,1:nq_adv)))
 ! **********************************************************************************************************
 ! Dry mass: the following way of updating delp is key to mass conservation with hybrid 32-64 bit computation
 ! **********************************************************************************************************
@@ -1932,7 +1946,7 @@ contains
                      Atm(mygrid)%cx, Atm(mygrid)%cy, Atm(mygrid)%ze0, Atm(mygrid)%flagstruct%hybrid_z,    &
                      Atm(mygrid)%gridstruct, Atm(mygrid)%flagstruct,                            &
                      Atm(mygrid)%neststruct, Atm(mygrid)%idiag, Atm(mygrid)%bd, Atm(mygrid)%parent_grid,  &
-                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp)
+                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp,0.0*u_dt,0.0*v_dt,0.0*t_dt,0.0*qp_dt)
 ! Backward
     call fv_dynamics(Atm(mygrid)%npx, Atm(mygrid)%npy, npz,  nq, Atm(mygrid)%ng, -dt_atmos, 0.,      &
                      Atm(mygrid)%flagstruct%fill, Atm(mygrid)%flagstruct%reproduce_sum, kappa, cp_air, zvir,  &
@@ -1947,7 +1961,7 @@ contains
                      Atm(mygrid)%cx, Atm(mygrid)%cy, Atm(mygrid)%ze0, Atm(mygrid)%flagstruct%hybrid_z,    &
                      Atm(mygrid)%gridstruct, Atm(mygrid)%flagstruct,                            &
                      Atm(mygrid)%neststruct, Atm(mygrid)%idiag, Atm(mygrid)%bd, Atm(mygrid)%parent_grid,  &
-                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp)
+                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp,0.0*u_dt,0.0*v_dt,0.0*t_dt,0.0*qp_dt)
 !Nudging back to IC
 !$omp parallel do default (none) &
 !$omp              shared (pref, npz, jsc, jec, isc, iec, n, sphum, Atm, u0, v0, t0, dp0, xt, zvir, mygrid, nudge_dz, dz0) &
@@ -2023,7 +2037,7 @@ contains
                      Atm(mygrid)%cx, Atm(mygrid)%cy, Atm(mygrid)%ze0, Atm(mygrid)%flagstruct%hybrid_z,    &
                      Atm(mygrid)%gridstruct, Atm(mygrid)%flagstruct,                            &
                      Atm(mygrid)%neststruct, Atm(mygrid)%idiag, Atm(mygrid)%bd, Atm(mygrid)%parent_grid,  &
-                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp)
+                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp,0.0*u_dt,0.0*v_dt,0.0*t_dt,0.0*qp_dt)
 ! Forward call
     call fv_dynamics(Atm(mygrid)%npx, Atm(mygrid)%npy, npz,  nq, Atm(mygrid)%ng, dt_atmos, 0.,      &
                      Atm(mygrid)%flagstruct%fill, Atm(mygrid)%flagstruct%reproduce_sum, kappa, cp_air, zvir,  &
@@ -2037,7 +2051,7 @@ contains
                      Atm(mygrid)%cx, Atm(mygrid)%cy, Atm(mygrid)%ze0, Atm(mygrid)%flagstruct%hybrid_z,    &
                      Atm(mygrid)%gridstruct, Atm(mygrid)%flagstruct,                            &
                      Atm(mygrid)%neststruct, Atm(mygrid)%idiag, Atm(mygrid)%bd, Atm(mygrid)%parent_grid,  &
-                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp)
+                     Atm(mygrid)%domain,Atm(mygrid)%diss_est, Atm(mygrid)%inline_mp,0.0*u_dt,0.0*v_dt,0.0*t_dt,0.0*qp_dt)
 ! Nudging back to IC
 !$omp parallel do default (none) &
 !$omp              shared (nudge_dz,npz, jsc, jec, isc, iec, n, sphum, Atm, u0, v0, t0, dz0, dp0, xt, zvir, mygrid) &

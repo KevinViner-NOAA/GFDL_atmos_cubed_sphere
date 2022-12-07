@@ -187,7 +187,8 @@ contains
                         ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc,     &
                         ak, bk, mfx, mfy, cx, cy, ze0, hybrid_z,                      &
                         gridstruct, flagstruct, neststruct, idiag, bd,                &
-                        parent_grid, domain, diss_est, inline_mp)
+                        parent_grid, domain, diss_est, inline_mp,                     &
+                        up_dt,vp_dt,tp_dt,qp_dt)
 
     use mpp_mod,           only: FATAL, mpp_error
     use ccpp_static_api,   only: ccpp_physics_timestep_init,    &
@@ -261,6 +262,10 @@ contains
 ! Accumulated Courant number arrays
     real, intent(inout) ::  cx(bd%is:bd%ie+1, bd%jsd:bd%jed, npz)
     real, intent(inout) ::  cy(bd%isd:bd%ied ,bd%js:bd%je+1, npz)
+
+! Arrays to put physics tendencies as forcing on RHS
+    real, dimension(:,:,:), intent(in) :: up_dt, vp_dt, tp_dt
+    real, dimension(:,:,:,:), intent(in) :: qp_dt
 
     type(fv_grid_type),  intent(inout), target :: gridstruct
     type(fv_flags_type), intent(INOUT) :: flagstruct
@@ -684,7 +689,8 @@ contains
                     u, v, w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va,           &
                     uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
                     gridstruct, flagstruct, neststruct, idiag, bd, &
-                    domain, n_map==1, i_pack, last_step, diss_est,time_total)
+                    domain, n_map==1, i_pack, last_step, diss_est,time_total, &
+                    up_dt, vp_dt, tp_dt, qp_dt)
                                            call timing_off('DYN_CORE')
 
 

@@ -120,6 +120,7 @@ module dyn_core_mod
   use fv_timing_mod,      only: timing_on, timing_off
   use fv_diagnostics_mod, only: prt_maxmin, fv_time, prt_mxm
   use fv_diag_column_mod, only: do_diag_debug_dyn, debug_column_dyn
+  use fv_update_phys_mod, only: update_dwinds_phys
 #ifdef ROT3
   use fv_update_phys_mod, only: update_dwinds_phys
 #endif
@@ -180,7 +181,7 @@ contains
                      u,  v,  w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va, &
                      uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, &
                      ks, gridstruct, flagstruct, neststruct, idiag, bd, domain, &
-                     init_step, i_pack, end_step, diss_est,time_total)
+                     init_step, i_pack, end_step, diss_est, time_total, upa_dt, vpa_dt, tp_dt, qp_dt)
 
     integer, intent(IN) :: npx
     integer, intent(IN) :: npy
@@ -244,6 +245,13 @@ contains
     real, intent(inout)::  cx(bd%is:bd%ie+1, bd%jsd:bd%jed, npz)
     real, intent(inout)::  cy(bd%isd:bd%ied ,bd%js:bd%je+1, npz)
     real, intent(inout),dimension(bd%is:bd%ie,bd%js:bd%je,npz):: pkz
+
+    real, intent(in), dimension(bd%isd:bd%ied, bd%jsd:bd%jed, npz) :: upa_dt, vpa_dt, tp_dt
+    real, intent(in), dimension(bd%isd:bd%ied, bd%jsd:bd%jed, npz, nq) :: qp_dt
+
+    real, dimension(bd%isd:bd%ied+1, bd%jsd:bd%jed, npz) :: vpd_dt
+    real, dimension(bd%isd:bd%ied, bd%jsd:bd%jed+1, npz) :: upd_dt
+    real, dimension(bd%isd:bd%ied, bd%jsd:bd%jed, npz) :: vpa_tmp, upa_tmp
 
     type(fv_grid_type),  intent(INOUT), target :: gridstruct
     type(fv_flags_type), intent(IN),    target :: flagstruct
@@ -402,6 +410,12 @@ contains
          endif
     endif
 
+    upd_dt = 0.
+    vpd_dt = 0.
+    upa_tmp = upa_dt
+    vpa_tmp = vpa_dt
+    call update_dwinds_phys(is, ie, js, je, isd, ied, jsd, jed, 1.0, upa_tmp, vpa_tmp, upd_dt, vpd_dt, gridstruct, npx, npy, npz, domain)
+
 !-----------------------------------------------------
   do it=1,n_split
 !-----------------------------------------------------
@@ -528,7 +542,7 @@ contains
                                                      call timing_on('c_sw')
 !$OMP parallel do default(none) shared(npz,isd,jsd,delpc,delp,ptc,pt,u,v,w,uc,vc,ua,va, &
 !$OMP                                  omga,ut,vt,divgd,flagstruct,dt2,hydrostatic,bd,  &
-!$OMP                                  gridstruct)
+!$OMP                                  gridstruct,upd_dt,vpd_dt)
       do k=1,npz
          call c_sw(delpc(isd,jsd,k), delp(isd,jsd,k),  ptc(isd,jsd,k),    &
                       pt(isd,jsd,k),    u(isd,jsd,k),    v(isd,jsd,k),    &
@@ -536,7 +550,7 @@ contains
                       ua(isd,jsd,k),   va(isd,jsd,k), omga(isd,jsd,k),    &
                       ut(isd,jsd,k),   vt(isd,jsd,k), divgd(isd,jsd,k),   &
                       flagstruct%nord,   dt2,  hydrostatic,  .true., bd,  &
-                      gridstruct, flagstruct)
+                      gridstruct, flagstruct, upd_dt(isd,jsd,k), vpd_dt(isd,jsd,k))
       enddo
                                                      call timing_off('c_sw')
       if ( flagstruct%nord > 0 ) then
@@ -770,7 +784,7 @@ contains
 !$OMP                                  is,ie,js,je,isd,ied,jsd,jed,omga,delp,gridstruct,npx,npy,  &
 !$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,ua,va,divgd,mfx,mfy,cx,cy,     &
 !$OMP                                  crx,cry,xfx,yfx,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
-!$OMP                                  heat_source,diss_est,ptop,first_call)                                      &
+!$OMP                                  heat_source,diss_est,ptop,first_call, upd_dt, vpd_dt, tp_dt, qp_dt)                                      &
 !$OMP                          private(nord_k, nord_w, nord_t, damp_w, damp_t, d2_divg,   &
 !$OMP                          d_con_k,kgb, hord_m, hord_v, hord_t, hord_p, wk, heat_s,diss_e, z_rat)
     do k=1,npz
@@ -891,7 +905,8 @@ contains
                   kgb, heat_s, diss_e,zvir, sphum, nq,  q,  k,  npz, flagstruct%inline_q,  dt,  &
                   flagstruct%hord_tr, hord_m, hord_v, hord_t, hord_p,    &
                   nord_k, nord_v(k), nord_w, nord_t, flagstruct%dddmp, d2_divg, flagstruct%d4_bg,  &
-                  damp_vt(k), damp_w, damp_t, d_con_k, hydrostatic, gridstruct, flagstruct, bd)
+                  damp_vt(k), damp_w, damp_t, d_con_k, hydrostatic, gridstruct, flagstruct, bd, &
+                  upd_dt(isd,jsd,k), vpd_dt(isd,jsd,k), tp_dt(isd,jsd,k), qp_dt)
 
        if( hydrostatic .and. (.not.flagstruct%use_old_omega) .and. last_step ) then
 ! Average horizontal "convergence" to cell center
