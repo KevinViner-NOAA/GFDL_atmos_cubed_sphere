@@ -75,9 +75,11 @@ module molecular_diffusion_mod
       real, parameter:: bz=1.3806505e-23   ! Boltzmann constant J/K
       real, parameter:: a12=9.69e18 ! O-O2 diffusion params
       real, parameter:: s12=0.774
+      real, allocatable :: visc3d(:,:,:)
 !
       public molecular_diffusion_init, read_namelist_molecular_diffusion_nml
       public molecular_diffusion_coefs, thermosphere_adjustment
+      public visc3d
 
       CONTAINS
 ! --------------------------------------------------------
@@ -149,7 +151,7 @@ module molecular_diffusion_mod
       end subroutine read_namelist_molecular_diffusion_nml
 
 ! --------------------------------------------------------
-      subroutine molecular_diffusion_coefs(dim,plyr,temp,q,mur,lam,d12)
+      subroutine molecular_diffusion_coefs(dim,plyr,temp,q,mur,murlim,lam,d12)
 !--------------------------------------------
 ! !OUTPUT PARAMETERS
 ! Input: dim : length of field
@@ -162,7 +164,7 @@ module molecular_diffusion_mod
 !--------------------------------------------
       integer, intent(in):: dim
       real, intent(in):: plyr(dim), temp(dim), q(dim,*)
-      real, intent(out):: mur(dim), lam(dim), d12(dim)
+      real, intent(out):: mur(dim), murlin(dim), lam(dim), d12(dim)
 ! Local:
       integer i, n, spo3, spo, spo2
       real   am, fgas, a12bz, avgdbz
@@ -240,7 +242,7 @@ module molecular_diffusion_mod
 !       lam(n) = la * t69 / rho / cpx
 
 !reasonable assured
-         mur(n) = min(mur(n),1.0e15)    ! viscosity
+         murlim(n) = min(mur(n),1.0e15)    ! viscosity
          lam(n) = min(lam(n),1.0e15)    ! conductivity
          d12(n) = min(d12(n),1.0e15)    ! diffusivity
 

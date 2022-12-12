@@ -45,7 +45,7 @@
 ! </table>
 
  use molecular_diffusion_mod,  only: molecular_diffusion_coefs, &
-                                     tau_visc, tau_cond, tau_diff
+                                     tau_visc, tau_cond, tau_diff, visc3d
  use tp_core_mod,       only: fv_tp_2d, pert_ppm, copy_corners,    &
                               deln_flux_explm, deln_flux_explm_udvd
  use fv_mp_mod, only: is_master, fill_corners, XDir, YDir
@@ -1599,7 +1599,7 @@
 !---
       real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed,1:nq)::  qtra
       real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: temp, plyr
-      real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: visc, cond, diff
+      real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: visc, visclim, cond, diff
 
       real :: coefmax
 
@@ -1609,6 +1609,9 @@
       integer :: is,  ie,  js,  je
       integer :: isd, ied, jsd, jed
       integer :: npx, npy, nord
+
+      if(.not.allocated(visc3d)) allocate(visc3d(bd%isd:bd%ied,bd%jsd:bd%jed,km))
+      visc3d = 0.0
 
       is  = bd%is
       ie  = bd%ie
@@ -1653,8 +1656,10 @@
       endif
 
       call molecular_diffusion_coefs(ijm,plyr(isd,jsd  ),temp(isd,jsd),&
-                                         qtra(isd,jsd,1),visc(isd,jsd),&
+                                         qtra(isd,jsd,1),visc(isd,jsd),visclim(isd,jsd),&
                                          cond(isd,jsd  ),diff(isd,jsd))
+
+      visc3d(:,:,k) = visc(:,:)
 
 ! time scale  and options
 
@@ -1666,7 +1671,7 @@
 
       do j=jsd,jed
          do i=isd,ied
-            visc(i,j) = min(coefmax,visc(i,j))*abs(dt)*tau_visc
+            visc(i,j) = min(coefmax,visclim(i,j))*abs(dt)*tau_visc
             cond(i,j) = min(coefmax,cond(i,j))*abs(dt)*tau_cond
             diff(i,j) = min(coefmax,diff(i,j))*abs(dt)*tau_diff
          enddo

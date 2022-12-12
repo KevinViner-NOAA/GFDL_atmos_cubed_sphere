@@ -1381,7 +1381,7 @@ CONTAINS
                         kapad2, &
 #endif
                         pe, dm2,   &
-                        pm2, pem, w2, dz2, pt2, ws, p_fac)
+                        pm2, pem, w2, dz2, pt2, ws, p_fac, visc_in)
    integer, intent(in):: is, ie, km
    real,    intent(in):: dt, rgas, gama, kappa, p_fac
    real, intent(in), dimension(is:ie,km):: dm2, pt2, pm2, gm2, cp2
@@ -1389,11 +1389,12 @@ CONTAINS
    real, intent(in ), dimension(is:ie,km+1):: pem
    real, intent(out)::  pe(is:ie,km+1)
    real, intent(inout), dimension(is:ie,km):: dz2, w2
+   real, optional, intent(in), dimension(is:ie,km) :: visc_in
 #ifdef MULTI_GASES
    real, intent(inout), dimension(is:ie,km):: kapad2
 #endif
 ! Local
-   real, dimension(is:ie,km  ):: aa, bb, dd, w1, g_rat, gam
+   real, dimension(is:ie,km  ):: aa, bb, dd, w1, g_rat, gam, mdp, mdm, visc
    real, dimension(is:ie,km+1):: pp
    real, dimension(is:ie):: p1, bet
    real t1g, rdt, capa1
@@ -1401,6 +1402,12 @@ CONTAINS
    real  gamax, capa1x, t1gx
 #endif
    integer i, k
+
+   if(present(visc_in))then
+     visc = visc_in
+   else
+     visc = 0.0
+   endif
 
 #ifdef MOIST_CAPPA
       t1g = 2.*dt*dt
@@ -1470,17 +1477,20 @@ CONTAINS
           aa(i,k) = t1g/(dz2(i,k-1)+dz2(i,k)) * (pem(i,k)+pp(i,k))
 #endif
 #endif
+          mdp(i,k) = dt*visc(i,k+1)/(dz2(i,k))**2
+          mdm(i,k) = dt*visc(i,k)/(dz2(i,k)*dz2(i,k-1))
        enddo
     enddo
     do i=is, ie
-       bet(i)  = dm2(i,1) - aa(i,2)
+       mdp(i,1) = dt*visc(i,2)/(dz2(i,1))**2
+       bet(i)  = (1.0-mdp(i,1))*dm2(i,1) - aa(i,2)
        w2(i,1) = (dm2(i,1)*w1(i,1) + dt*pp(i,2)) / bet(i)
     enddo
     do k=2,km-1
        do i=is, ie
-          gam(i,k) = aa(i,k) / bet(i)
-            bet(i) =  dm2(i,k) - (aa(i,k) + aa(i,k+1) + aa(i,k)*gam(i,k))
-           w2(i,k) = (dm2(i,k)*w1(i,k)+dt*(pp(i,k+1)-pp(i,k))-aa(i,k)*w2(i,k-1)) / bet(i)
+          gam(i,k) = (aa(i,k)+mdm(i,k)*dm2(i,k)) / bet(i)
+            bet(i) = (1.0-(mdp(i,k)+mdm(i,k))*dm2(i,k) - (aa(i,k) + aa(i,k+1) + (aa(i,k)+mdp(i,k)*dm2(i,k))*gam(i,k))
+           w2(i,k) = (dm2(i,k)*w1(i,k)+dt*(pp(i,k+1)-pp(i,k))-(aa(i,k)+mdp(i,k)*dm2(i,k))*w2(i,k-1)) / bet(i)
        enddo
     enddo
     do i=is, ie

@@ -112,7 +112,7 @@ module dyn_core_mod
   use fv_mp_mod,          only: start_group_halo_update, complete_group_halo_update
   use fv_mp_mod,          only: group_halo_update_type
   use molecular_diffusion_mod,       &
-                          only: md_time, md_layers, md_consv_te, md_tadj_layers
+                          only: md_time, md_layers, md_consv_te, md_tadj_layers, visc3d
   use sw_core_mod,        only: c_sw, d_sw, d_md
   use a2b_edge_mod,       only: a2b_ord2, a2b_ord4
   use nh_core_mod,        only: Riem_Solver3, Riem_Solver_C, update_dz_c, update_dz_d, nh_bc
@@ -1041,6 +1041,11 @@ contains
         endif
                                                          call timing_on('Riem_Solver')
 
+        if(.not.allocated(visc3d))then
+          allocate(visc3d(isd:ied,jsd:jed,npz))
+          visc3d = 0.0
+        endif
+
         call Riem_Solver3(flagstruct%m_split, dt,  is,  ie,   js,   je, npz, ng,     &
                          isd, ied, jsd, jed, &
                          akap, cappa, cp,  &
@@ -1050,7 +1055,7 @@ contains
                          ptop, zs, q_con, w, delz, pt, delp, zh,   &
                          pe, pkc, pk3, pk, peln, ws, &
                          flagstruct%scale_z, flagstruct%p_fac, flagstruct%a_imp, &
-                         flagstruct%use_logp, remap_step, beta<-0.1)
+                         flagstruct%use_logp, remap_step, beta<-0.1,visc3d)
                                                          call timing_off('Riem_Solver')
 
                                        call timing_on('COMM_TOTAL')
