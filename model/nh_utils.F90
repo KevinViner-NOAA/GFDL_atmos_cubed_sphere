@@ -1477,20 +1477,20 @@ CONTAINS
           aa(i,k) = t1g/(dz2(i,k-1)+dz2(i,k)) * (pem(i,k)+pp(i,k))
 #endif
 #endif
-          mdp(i,k) = dt*visc(i,k+1)/(dz2(i,k))**2
-          mdm(i,k) = dt*visc(i,k)/(dz2(i,k)*dz2(i,k-1))
+          mdp(i,k) = 4.0*dt*visc(i,k+1)/(dz2(i,k+1)+dz2(i,k))**2
+          mdm(i,k) = 4.0*dt*visc(i,k)/((dz2(i,k+1)+dz2(i,k))*(dz2(i,k)+dz2(i,k-1)))
        enddo
     enddo
     do i=is, ie
-       mdp(i,1) = dt*visc(i,2)/(dz2(i,1))**2
+       mdp(i,1) = 4.0*dt*visc(i,2)/(dz2(i,2)+dz2(i,1))**2
        bet(i)  = (1.0-mdp(i,1))*dm2(i,1) - aa(i,2)
        w2(i,1) = (dm2(i,1)*w1(i,1) + dt*pp(i,2)) / bet(i)
     enddo
     do k=2,km-1
        do i=is, ie
           gam(i,k) = (aa(i,k)+mdm(i,k)*dm2(i,k)) / bet(i)
-            bet(i) = (1.0-(mdp(i,k)+mdm(i,k))*dm2(i,k) - (aa(i,k) + aa(i,k+1) + (aa(i,k)+mdp(i,k)*dm2(i,k))*gam(i,k))
-           w2(i,k) = (dm2(i,k)*w1(i,k)+dt*(pp(i,k+1)-pp(i,k))-(aa(i,k)+mdp(i,k)*dm2(i,k))*w2(i,k-1)) / bet(i)
+          bet(i) = (1.0-(mdp(i,k)+mdm(i,k)))*dm2(i,k) - (aa(i,k) + aa(i,k+1) + (aa(i,k)+mdp(i,k)*dm2(i,k))*gam(i,k))
+          w2(i,k) = (dm2(i,k)*w1(i,k)+dt*(pp(i,k+1)-pp(i,k))-(aa(i,k)+mdm(i,k)*dm2(i,k))*w2(i,k-1)) / bet(i)
        enddo
     enddo
     do i=is, ie
@@ -1505,9 +1505,10 @@ CONTAINS
            p1(i) = t1g/dz2(i,km)*(pem(i,km+1)+pp(i,km+1))
 #endif
 #endif
-       gam(i,km) = aa(i,km) / bet(i)
-          bet(i) =  dm2(i,km) - (aa(i,km)+p1(i) + aa(i,km)*gam(i,km))
-        w2(i,km) = (dm2(i,km)*w1(i,km)+dt*(pp(i,km+1)-pp(i,km))-p1(i)*ws(i)-aa(i,km)*w2(i,km-1))/bet(i)
+       mdm(i,km) = 4.0*dt*visc(i,km)/((dz2(i,km)+dz2(i,km-1))*(dz2(i,km-1)+dz2(i,km-2)))
+       gam(i,km) = (aa(i,km)+mdm(i,km)*dm2(i,km)) / bet(i)
+       bet(i) =  (1.0-mdm(i,km))*dm2(i,km) - (aa(i,km)+p1(i) + (aa(i,km)+mdm(i,km)*dm2(i,km))*gam(i,km))
+       w2(i,km) = (dm2(i,km)*w1(i,km)+dt*(pp(i,km+1)-pp(i,km))-p1(i)*ws(i)-(aa(i,km)+mdm(i,km)*dm2(i,km))*w2(i,km-1))/bet(i)
     enddo
     do k=km-1, 1, -1
        do i=is, ie
