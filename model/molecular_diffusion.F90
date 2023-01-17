@@ -164,7 +164,7 @@ module molecular_diffusion_mod
 !--------------------------------------------
       integer, intent(in):: dim
       real, intent(in):: plyr(dim), temp(dim), q(dim,*)
-      real, intent(out):: mur(dim), murlin(dim), lam(dim), d12(dim)
+      real, intent(out):: mur(dim), murlim(dim), lam(dim), d12(dim)
 ! Local:
       integer i, n, spo3, spo, spo2
       real   am, fgas, a12bz, avgdbz
