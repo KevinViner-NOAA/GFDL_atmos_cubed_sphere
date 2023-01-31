@@ -452,6 +452,10 @@ contains
 !--- allocate pref
    allocate(pref(npz+1,2), dum1d(npz+1))
 
+   u_dt = 0.0
+   v_dt = 0.0
+   t_dt = 0.0
+
    ! DH* 20210326
    ! First, read atmos_model_nml namelist section - this is a workaround to avoid
    ! unnecessary additional changes to the input namelists, in anticipation of the
@@ -709,7 +713,7 @@ contains
                       Atm(n)%gridstruct,  Atm(n)%flagstruct,                    &
                       Atm(n)%neststruct,  Atm(n)%idiag, Atm(n)%bd,              &
                       Atm(n)%parent_grid, Atm(n)%domain,Atm(n)%diss_est,        &
-                      Atm(n)%inline_mp)
+                      Atm(n)%inline_mp, u_dt, v_dt, t_dt)
 
      call timing_off('fv_dynamics')
 

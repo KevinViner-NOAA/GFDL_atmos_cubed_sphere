@@ -132,7 +132,7 @@ module fv_dynamics_mod
    use dyn_core_mod,        only: dyn_core, del2_cubed, init_ijk_mem
    use fv_mapz_mod,         only: compute_total_energy, Lagrangian_to_Eulerian, moist_cv, moist_cp
    use fv_tracer2d_mod,     only: tracer_2d, tracer_2d_1L, tracer_2d_nested
-   use fv_grid_utils_mod,   only: cubed_to_latlon, c2l_ord2, g_sum
+   use fv_grid_utils_mod,   only: cubed_to_latlon, c2l_ord2, g_sum, update_dwinds_phys
    use fv_fill_mod,         only: fill2D
    use fv_mp_mod,           only: is_master
    use fv_mp_mod,           only: group_halo_update_type
@@ -154,6 +154,7 @@ module fv_dynamics_mod
    use fv_arrays_mod,       only: fv_grid_type, fv_flags_type, fv_atmos_type, fv_nest_type, fv_diag_type, fv_grid_bounds_type, inline_mp_type
    use fv_nwp_nudge_mod,    only: do_adiabatic_init
    use time_manager_mod,    only: get_time
+   use sw_core_mod,         only: d2a2c_vect
 
 #ifdef MULTI_GASES
    use multi_gases_mod,  only:  virq, vicpq, virqd, vicpqd
@@ -187,7 +188,7 @@ contains
                         ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc,     &
                         ak, bk, mfx, mfy, cx, cy, ze0, hybrid_z,                      &
                         gridstruct, flagstruct, neststruct, idiag, bd,                &
-                        parent_grid, domain, diss_est, inline_mp)
+                        parent_grid, domain, diss_est, inline_mp, upa_dt, vpa_dt, tp_dt)
 
     use mpp_mod,           only: FATAL, mpp_error
     use ccpp_static_api,   only: ccpp_physics_timestep_init,    &
@@ -255,6 +256,9 @@ contains
 
     type(inline_mp_type), intent(inout) :: inline_mp
 
+    real, optional, intent(in), dimension(bd%isd:bd%ied ,bd%jsd:bd%jed ,npz):: upa_dt, vpa_dt
+    real, optional, intent(in) :: tp_dt(bd%is:bd%ie,bd%js:bd%je,npz)
+
 ! Accumulated Mass flux arrays: the "Flux Capacitor"
     real, intent(inout) ::  mfx(bd%is:bd%ie+1, bd%js:bd%je,   npz)
     real, intent(inout) ::  mfy(bd%is:bd%ie  , bd%js:bd%je+1, npz)
@@ -298,6 +302,11 @@ contains
       integer :: ierr
       real :: time_total
       integer :: seconds, days
+      real :: upd_dt(bd%isd:bd%ied ,bd%jsd:bd%jed+1 ,npz)
+      real :: vpd_dt(bd%isd:bd%ied+1 ,bd%jsd:bd%jed ,npz)
+      real :: upc_dt(bd%isd:bd%ied+1 ,bd%jsd:bd%jed ,npz)
+      real :: vpc_dt(bd%isd:bd%ied ,bd%jsd:bd%jed+1 ,npz)
+      real, dimension(bd%isd:bd%ied ,bd%jsd:bd%jed ,npz):: upa_tmp, vpa_tmp, upt_dt, vpt_dt
 
       ccpp_associate: associate( cappa     => GFDL_interstitial%cappa,     &
                                  dp1       => GFDL_interstitial%te0,       &
@@ -626,6 +635,18 @@ contains
   endif
 
 
+  if(present(vpa_dt))then
+    upd_dt = 0.0
+    vpd_dt = 0.0
+    upa_tmp = upa_dt
+    vpa_tmp = vpa_dt
+    call update_dwinds_phys(is,ie,js,je,isd,ied,jsd,jed,1.0,upa_tmp,vpa_tmp,upd_dt,vpd_dt,gridstruct,npx,npy,npz,domain)
+    upc_dt = 0.0
+    vpc_dt = 0.0
+    call d2a2c_vect(upd_dt,vpd_dt,upa_tmp,vpa_tmp,upc_dt,vpc_dt,upt_dt,vpt_dt,.true.,gridstruct,bd, &
+                    npx,npy,gridstruct%bounded_domain,flagstruct%grid_type)
+  endif
+
                                                   call timing_on('FV_DYN_LOOP')
   do n_map=1, k_split   ! first level of time-split
       k_step = n_map
@@ -676,6 +697,7 @@ contains
 #endif
 
                                            call timing_on('DYN_CORE')
+     if(present(vpa_dt))then
       call dyn_core(npx, npy, npz, ng, sphum, nq, mdt, n_map, n_split, zvir, cp_air, akap, cappa, &
 #ifdef MULTI_GASES
                     kapad, &
@@ -684,9 +706,19 @@ contains
                     u, v, w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va,           &
                     uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
                     gridstruct, flagstruct, neststruct, idiag, bd, &
-                    domain, n_map==1, i_pack, last_step, diss_est,time_total)
-                                           call timing_off('DYN_CORE')
-
+                    domain, n_map==1, i_pack, last_step,diss_est,time_total,upc_dt,vpc_dt,upd_dt,vpd_dt,tp_dt)
+     else
+       call dyn_core(npx, npy, npz, ng, sphum, nq, mdt, n_map, n_split, zvir, cp_air, akap, cappa, &
+#ifdef MULTI_GASES
+                    kapad, &
+#endif
+                    grav, hydrostatic, &
+                    u, v, w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va,           &
+                    uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
+                    gridstruct, flagstruct, neststruct, idiag, bd, &
+                    domain, n_map==1, i_pack, last_step,diss_est,time_total)
+     endif
+                                          call timing_off('DYN_CORE')
 
 #ifdef SW_DYNAMICS
 !!$OMP parallel do default(none) shared(is,ie,js,je,ps,delp,agrav)

@@ -279,6 +279,7 @@ module fv_control_mod
      logical , pointer :: use_old_omega
      ! PG off centering:
      real    , pointer :: beta
+     real    , pointer :: phys_decenter
      integer , pointer :: n_sponge
      real    , pointer :: d_ext
      integer , pointer :: nwat
@@ -841,6 +842,7 @@ module fv_control_mod
        do_vort_damp                  => Atm%flagstruct%do_vort_damp
        use_old_omega                 => Atm%flagstruct%use_old_omega
        beta                          => Atm%flagstruct%beta
+       phys_decenter                 => Atm%flagstruct%phys_decenter
        n_sponge                      => Atm%flagstruct%n_sponge
        d_ext                         => Atm%flagstruct%d_ext
        nwat                          => Atm%flagstruct%nwat
@@ -1059,7 +1061,7 @@ module fv_control_mod
             kord_mt, kord_wz, kord_tm, kord_tr, fv_debug, fv_land, nudge, do_sat_adj, do_inline_mp, do_f3d, &
             external_ic, read_increment, ncep_ic, nggps_ic, hrrrv3_ic, ecmwf_ic, use_new_ncep, use_ncep_phy, fv_diag_ic, &
             external_eta, res_latlon_dynamics, res_latlon_tracers, scale_z, w_max, z_min, lim_fac, &
-            dddmp, d2_bg, d4_bg, vtdm4, trdm2, d_ext, delt_max, beta, non_ortho, n_sponge, &
+            dddmp, d2_bg, d4_bg, vtdm4, trdm2, d_ext, delt_max, beta, phys_decenter, non_ortho, n_sponge, &
             warm_start, adjust_dry_mass, mountain, d_con, ke_bg, nord, nord_tr, convert_ke, use_old_omega, &
             dry_mass, grid_type, do_Held_Suarez, do_reed_physics, reed_cond_only, &
             consv_te, fill, filter_phys, fill_dp, fill_wz, fill_gfs, consv_am, RF_fast, &

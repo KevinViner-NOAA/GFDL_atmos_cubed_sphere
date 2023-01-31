@@ -232,7 +232,23 @@ module fv_update_phys_mod
 !account for change in air molecular weight because of H2O change
     logical, dimension(nq) :: conv_vmr_mmr
     real                   :: adj_vmr(is:ie,js:je,npz)
-    character(len=32)      :: tracer_units, tracer_name
+    character(len=32)      :: tracer_units, tracer_name  
+    real                   :: phys_decenter_sv
+    logical, save          :: first=.true.
+    real, dimension(isd:ied,jsd:jed,npz):: u_dt_sv, v_dt_sv
+    real :: t_dt_sv(is:ie,js:je,npz)
+
+    if(first)then
+      phys_decenter_sv = flagstruct%phys_decenter
+      flagstruct%phys_decenter = 1.0
+    endif
+    
+    u_dt_sv = u_dt
+    u_dt = flagstruct%phys_decenter*u_dt_sv
+    v_dt_sv = v_dt
+    v_dt = flagstruct%phys_decenter*v_dt_sv
+    t_dt_sv = t_dt
+    t_dt = flagstruct%phys_decenter*t_dt_sv
 
     cv_air = cp_air - rdgas ! = rdgas * (7/2-1) = 2.5*rdgas=717.68
 
@@ -770,6 +786,15 @@ module fv_update_phys_mod
      enddo
      enddo
   endif
+
+  if(first)then
+    flagstruct%phys_decenter = phys_decenter_sv
+    first = .false.
+  endif
+
+  u_dt = u_dt_sv
+  v_dt = v_dt_sv
+  t_dt = t_dt_sv
 
   end subroutine fv_update_phys
 

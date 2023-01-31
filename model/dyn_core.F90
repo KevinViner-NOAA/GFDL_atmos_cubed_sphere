@@ -180,7 +180,7 @@ contains
                      u,  v,  w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va, &
                      uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, &
                      ks, gridstruct, flagstruct, neststruct, idiag, bd, domain, &
-                     init_step, i_pack, end_step, diss_est,time_total)
+                     init_step, i_pack, end_step, diss_est,time_total,upc_dt,vpc_dt,upd_dt,vpd_dt,tp_dt)
 
     integer, intent(IN) :: npx
     integer, intent(IN) :: npy
@@ -210,7 +210,11 @@ contains
     real, intent(inout) :: q(   bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, nq)  !
     real, intent(in), optional:: time_total  !< total time (seconds) since start
     real, intent(inout) :: diss_est(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)  !< skeb dissipation estimate
-
+    real, intent(in), optional :: tp_dt(bd%is:bd%ie, bd%js:bd%je, npz)
+    real, intent(in), optional, dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz):: vpc_dt  !< C grid zonal wind (m/s)
+    real, intent(in), optional, dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz):: upc_dt  !< C grid meridional wind (m/s)
+    real, intent(in), optional, dimension(bd%isd:bd%ied  ,bd%jsd:bd%jed+1,npz):: upd_dt  !< D grid zonal wind (m/s)
+    real, intent(in), optional, dimension(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz):: vpd_dt  !< D grid meridional wind (m/s)
 !-----------------------------------------------------------------------
 ! Auxilliary pressure arrays:
 ! The 5 vars below can be re-computed from delp and ptop.
@@ -528,7 +532,7 @@ contains
                                                      call timing_on('c_sw')
 !$OMP parallel do default(none) shared(npz,isd,jsd,delpc,delp,ptc,pt,u,v,w,uc,vc,ua,va, &
 !$OMP                                  omga,ut,vt,divgd,flagstruct,dt2,hydrostatic,bd,  &
-!$OMP                                  gridstruct)
+!$OMP                                  gridstruct,upc_dt,vpc_dt)
       do k=1,npz
          call c_sw(delpc(isd,jsd,k), delp(isd,jsd,k),  ptc(isd,jsd,k),    &
                       pt(isd,jsd,k),    u(isd,jsd,k),    v(isd,jsd,k),    &
@@ -538,6 +542,21 @@ contains
                       flagstruct%nord,   dt2,  hydrostatic,  .true., bd,  &
                       gridstruct, flagstruct)
       enddo
+
+     if(present(vpc_dt))then
+       do k=1,npz
+         do j=jsd,jed
+            do i=isd,ied+1
+               uc(i,j,k) = uc(i,j,k) + dt2*(1.0-flagstruct%phys_decenter)*upc_dt(i,j,k)
+            enddo
+         enddo
+         do j=jsd,jed+1
+            do i=isd,ied
+               vc(i,j,k) = vc(i,j,k) + dt2*(1.0-flagstruct%phys_decenter)*vpc_dt(i,j,k)
+            enddo
+         enddo
+       enddo
+     endif
                                                      call timing_off('c_sw')
       if ( flagstruct%nord > 0 ) then
                                                    call timing_on('COMM_TOTAL')
@@ -770,9 +789,10 @@ contains
 !$OMP                                  is,ie,js,je,isd,ied,jsd,jed,omga,delp,gridstruct,npx,npy,  &
 !$OMP                                  ng,zh,vt,ptc,pt,u,v,w,uc,vc,ua,va,divgd,mfx,mfy,cx,cy,     &
 !$OMP                                  crx,cry,xfx,yfx,q_con,zvir,sphum,nq,q,dt,bd,rdt,iep1,jep1, &
-!$OMP                                  heat_source,diss_est,ptop,first_call)                                      &
+!$OMP                                  heat_source,diss_est,ptop,first_call,upd_dt,vpd_dt,tp_dt,pkz,cv_air)                                      &
 !$OMP                          private(nord_k, nord_w, nord_t, damp_w, damp_t, d2_divg,   &
 !$OMP                          d_con_k,kgb, hord_m, hord_v, hord_t, hord_p, wk, heat_s,diss_e, z_rat)
+
     do k=1,npz
        hord_m = flagstruct%hord_mt
        hord_t = flagstruct%hord_tm
@@ -878,6 +898,7 @@ contains
             enddo
          enddo
        endif
+    
        call d_sw(vt(isd,jsd,k), delp(isd,jsd,k), ptc(isd,jsd,k),  pt(isd,jsd,k),      &
                   u(isd,jsd,k),    v(isd,jsd,k),   w(isd:,jsd:,k),  uc(isd,jsd,k),      &
                   vc(isd,jsd,k),   ua(isd,jsd,k),  va(isd,jsd,k), divgd(isd,jsd,k),   &
@@ -892,6 +913,24 @@ contains
                   flagstruct%hord_tr, hord_m, hord_v, hord_t, hord_p,    &
                   nord_k, nord_v(k), nord_w, nord_t, flagstruct%dddmp, d2_divg, flagstruct%d4_bg,  &
                   damp_vt(k), damp_w, damp_t, d_con_k, hydrostatic, gridstruct, flagstruct, bd)
+ 
+      if(present(vpd_dt))then
+        do j=jsd,jed+1
+           do i=isd,ied
+              u(i,j,k) = u(i,j,k) + dt*(1.0-flagstruct%phys_decenter)*upd_dt(i,j,k)
+           enddo
+        enddo
+        do j=jsd,jed
+           do i=isd,ied+1
+              v(i,j,k) = v(i,j,k) + dt*(1.0-flagstruct%phys_decenter)*vpd_dt(i,j,k)
+           enddo
+        enddo
+        do j=js,je
+          do i=is,ie
+            pt(i,j,k) = pt(i,j,k) + (dt*(1.0-flagstruct%phys_decenter)*tp_dt(i,j,k))/(cv_air*delp(i,j,k)*pkz(i,j,k))
+          enddo
+        enddo
+      endif
 
        if( hydrostatic .and. (.not.flagstruct%use_old_omega) .and. last_step ) then
 ! Average horizontal "convergence" to cell center

@@ -97,7 +97,8 @@
 
       private
       public :: c_sw, d_sw, d_md, fill_4corners, &
-                del6_vt_flux, divergence_corner, divergence_corner_nest
+                del6_vt_flux, divergence_corner, divergence_corner_nest, &
+                d2a2c_vect
 
   contains
 
