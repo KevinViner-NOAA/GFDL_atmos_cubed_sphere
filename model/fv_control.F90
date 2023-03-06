@@ -378,6 +378,7 @@ module fv_control_mod
      logical , pointer :: read_increment
      logical , pointer :: hydrostatic
      logical , pointer :: phys_hydrostatic
+     logical , pointer :: phys_dribble
      logical , pointer :: use_hydro_pressure
      logical , pointer :: do_uni_zfull !miz
      logical , pointer :: adj_mass_vmr ! f1p
@@ -940,6 +941,7 @@ module fv_control_mod
 
        hydrostatic                   => Atm%flagstruct%hydrostatic
        phys_hydrostatic              => Atm%flagstruct%phys_hydrostatic
+       phys_dribble                  => Atm%flagstruct%phys_dribble
        use_hydro_pressure            => Atm%flagstruct%use_hydro_pressure
        do_uni_zfull                  => Atm%flagstruct%do_uni_zfull !miz
        adj_mass_vmr                  => Atm%flagstruct%adj_mass_vmr !f1p
@@ -1069,7 +1071,7 @@ module fv_control_mod
             pnats, dnats, dnrts, a2b_ord, remap_t, p_ref, d2_bg_k1, d2_bg_k2,  &
             c2l_ord, dx_const, dy_const, umax, deglat,      &
             deglon_start, deglon_stop, deglat_start, deglat_stop, &
-            phys_hydrostatic, use_hydro_pressure, make_hybrid_z, old_divg_damp, add_noise, butterfly_effect, &
+            phys_hydrostatic, phys_dribble, use_hydro_pressure, make_hybrid_z, old_divg_damp, add_noise, butterfly_effect, &
             molecular_diffusion, dz_min, psm_bc, nested, twowaynest, nudge_qv, &
             nestbctype, nestupdate, nsponge, s_weight, &
             check_negative, nudge_ic, halo_update_type, gfs_phil, agrid_vel_rst,     &

@@ -279,6 +279,7 @@ character(len=20)   :: mod_name = 'fvGFS/atmosphere_mod'
 
 !---dynamics tendencies for use in fv_subgrid_z and during fv_update_phys
   real, allocatable, dimension(:,:,:)   :: u_dt, v_dt, t_dt, qv_dt
+  real, allocatable, dimension(:,:,:,:)   :: qp_dt
   real, allocatable                     :: pref(:,:), dum1d(:)
 
   logical :: first_diag = .true.
@@ -447,6 +448,7 @@ contains
    allocate( u_dt(isd:ied,jsd:jed,npz), &
              v_dt(isd:ied,jsd:jed,npz), &
              t_dt(isc:iec,jsc:jec,npz), &
+             qp_dt(isc:iec,jsc:jec,npz,nq), &
              qv_dt(isc:iec,jsc:jec,npz) )
 !--- allocate pref
    allocate(pref(npz+1,2), dum1d(npz+1))
@@ -708,7 +710,7 @@ contains
                       Atm(n)%gridstruct,  Atm(n)%flagstruct,                    &
                       Atm(n)%neststruct,  Atm(n)%idiag, Atm(n)%bd,              &
                       Atm(n)%parent_grid, Atm(n)%domain,Atm(n)%diss_est,        &
-                      Atm(n)%inline_mp)
+                      Atm(n)%inline_mp, u_dt, v_dt, t_dt, qp_dt)
 
      call timing_off('fv_dynamics')
 
@@ -1532,7 +1534,7 @@ contains
    integer :: i, j, ix, k, k1, n, w_diff, nt_dyn, iq
    integer :: nb, blen, nwat, dnats, nq_adv
    real(kind=kind_phys):: rcp, q0, qwat(nq), qt, rdt
-   real psum, qsum, psumb, qsumb, betad
+   real psum, qsum, psumb, qsumb, betad, dt_phys
    character(len=32) :: tracer_name
    Time_prev = Time
    Time_next = Time + Time_step_atmos
@@ -1543,6 +1545,9 @@ contains
    dnats = Atm(mygrid)%flagstruct%dnats
    nq_adv = nq - dnats
 
+   dt_phys = dt_atmos
+   if(Atm(n)%flagstruct%phys_dribble) dt_phys = dt_atmos/Atm(n)%flagstruct%k_split
+       
    if( nq<3 ) call mpp_error(FATAL, 'GFS phys must have 3 interactive tracers')
 
    if (IAU_Data%in_interval) then
@@ -1609,7 +1614,7 @@ contains
 #ifdef MULTI_GASES
 !$OMP                      num_gas,                                                      &
 #endif
-!$OMP                      snowwat, graupel, nq_adv, flip_vc)   &
+!$OMP                      snowwat, graupel, nq_adv, flip_vc, qp_dt, dt_phys)   &
 !$OMP             private (nb, blen, i, j, k, k1, ix, q0, qwat, qt, tracer_name)
    do nb = 1,Atm_block%nblks
 
@@ -1627,7 +1632,6 @@ contains
         endif
      enddo
 
-
      do k = 1, npz
        if(flip_vc) then
          k1 = npz+1-k !reverse the k direction
@@ -1641,6 +1645,8 @@ contains
          v_dt(i,j,k1) = v_dt(i,j,k1) + (IPD_Data(nb)%Stateout%gv0(ix,k) - IPD_Data(nb)%Statein%vgrs(ix,k)) * rdt
 !         t_dt(i,j,k1) = (IPD_Data(nb)%Stateout%gt0(ix,k) - IPD_Data(nb)%Statein%tgrs(ix,k)) * rdt
          t_dt(i,j,k1) = t_dt(i,j,k1) + (IPD_Data(nb)%Stateout%gt0(ix,k) - IPD_Data(nb)%Statein%tgrs(ix,k)) * rdt
+         qp_dt(i,j,k1,1:nq_adv) = (IPD_Data(nb)%Stateout%gq0(ix,k,1:nq_adv) - IPD_Data(nb)%Statein%qgrs(ix,k,1:nq_adv)) * rdt
+
 ! SJL notes:
 ! ---- DO not touch the code below; dry mass conservation may change due to 64bit <-> 32bit conversion
 ! GFS total air mass = dry_mass + water_vapor (condensate excluded)
@@ -1652,7 +1658,7 @@ contains
          else
            q0 = IPD_Data(nb)%Statein%prsi(ix,k+1) - IPD_Data(nb)%Statein%prsi(ix,k)
          endif
-         qwat(1:nq_adv) = q0*IPD_Data(nb)%Stateout%gq0(ix,k,1:nq_adv)
+         qwat(1:nq_adv) = q0*(IPD_Data(nb)%Statein%qgrs(ix,k,1:nq_adv)+dt_phys*qp_dt(i,j,k1,1:nq_adv))
 ! **********************************************************************************************************
 ! Dry mass: the following way of updating delp is key to mass conservation with hybrid 32-64 bit computation
 ! **********************************************************************************************************
@@ -1744,7 +1750,7 @@ contains
 
    call mpp_clock_begin (id_dynam)
        call timing_on('FV_UPDATE_PHYS')
-    call fv_update_phys( dt_atmos, isc, iec, jsc, jec, isd, ied, jsd, jed, Atm(n)%ng, nt_dyn, &
+    call fv_update_phys( dt_phys, isc, iec, jsc, jec, isd, ied, jsd, jed, Atm(n)%ng, nt_dyn, &
                          Atm(n)%u,  Atm(n)%v,   Atm(n)%w,  Atm(n)%delp, Atm(n)%pt,         &
                          Atm(n)%q,  Atm(n)%qdiag,                                          &
                          Atm(n)%ua, Atm(n)%va,  Atm(n)%ps, Atm(n)%pe,   Atm(n)%peln,       &

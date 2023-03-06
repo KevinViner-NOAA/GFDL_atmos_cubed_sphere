@@ -132,7 +132,7 @@ module fv_dynamics_mod
    use dyn_core_mod,        only: dyn_core, del2_cubed, init_ijk_mem
    use fv_mapz_mod,         only: compute_total_energy, Lagrangian_to_Eulerian, moist_cv, moist_cp
    use fv_tracer2d_mod,     only: tracer_2d, tracer_2d_1L, tracer_2d_nested
-   use fv_grid_utils_mod,   only: cubed_to_latlon, c2l_ord2, g_sum
+   use fv_grid_utils_mod,   only: cubed_to_latlon, c2l_ord2, g_sum, update_dwinds_phys
    use fv_fill_mod,         only: fill2D
    use fv_mp_mod,           only: is_master
    use fv_mp_mod,           only: group_halo_update_type
@@ -187,7 +187,8 @@ contains
                         ps, pe, pk, peln, pkz, phis, q_con, omga, ua, va, uc, vc,     &
                         ak, bk, mfx, mfy, cx, cy, ze0, hybrid_z,                      &
                         gridstruct, flagstruct, neststruct, idiag, bd,                &
-                        parent_grid, domain, diss_est, inline_mp)
+                        parent_grid, domain, diss_est, inline_mp, upa_dt, vpa_dt,     &
+                        tp_dt, qp_dt)
 
     use mpp_mod,           only: FATAL, mpp_error
     use ccpp_static_api,   only: ccpp_physics_timestep_init,    &
@@ -269,6 +270,10 @@ contains
     type(fv_atmos_type), pointer, intent(IN) :: parent_grid
     type(fv_diag_type),  intent(IN)    :: idiag
 
+    real, optional, intent(in), dimension(bd%isd:bd%ied,bd%jsd:bd%jed,npz) :: upa_dt, vpa_dt
+    real, optional, intent(in) :: tp_dt(bd%is:bd%ie,bd%js:bd%je,npz)
+    real, optional, intent(in) :: qp_dt(bd%is:bd%ie,bd%js:bd%je,npz,nq_tot)
+
 ! Local Arrays
       real:: ws(bd%is:bd%ie,bd%js:bd%je)
       real::   teq(bd%is:bd%ie,bd%js:bd%je)
@@ -298,6 +303,11 @@ contains
       integer :: ierr
       real :: time_total
       integer :: seconds, days
+      real :: upd_dt(bd%isd:bd%ied ,bd%jsd:bd%jed+1 ,npz)
+      real :: vpd_dt(bd%isd:bd%ied+1 ,bd%jsd:bd%jed ,npz)
+      real, dimension(bd%isd:bd%ied ,bd%jsd:bd%jed ,npz):: upa_tmp, vpa_tmp
+      real :: qwat(nq_tot)
+      real :: q0, qt, cv_air, gama_dt
 
       ccpp_associate: associate( cappa     => GFDL_interstitial%cappa,     &
                                  dp1       => GFDL_interstitial%te0,       &
@@ -314,8 +324,7 @@ contains
       jsd = bd%jsd
       jed = bd%jed
 
-
-!     cv_air =  cp_air - rdgas
+     cv_air =  cp_air - rdgas
       agrav = 1. / grav
         dt2 = 0.5*bdt
       k_split = flagstruct%k_split
@@ -625,7 +634,19 @@ contains
        enddo
   endif
 
+ if(flagstruct%phys_dribble .and. present(vpa_dt))then
+    upd_dt = 0.0
+    vpd_dt = 0.0
+    upa_tmp = upa_dt
+    vpa_tmp = vpa_dt
+    call update_dwinds_phys(is,ie,js,je,isd,ied,jsd,jed,1.0,upa_tmp,vpa_tmp,upd_dt,vpd_dt,gridstruct,npx,npy,npz,domain)
 
+    if ( .not. hydrostatic .and. .not. flagstruct%phys_hydrostatic .and. nwat == 0 ) then
+       gama_dt = mdt*cp_air/cv_air
+    else
+       gama_dt = -1.e24
+    endif
+  endif
                                                   call timing_on('FV_DYN_LOOP')
   do n_map=1, k_split   ! first level of time-split
       k_step = n_map
@@ -777,6 +798,188 @@ contains
                      flagstruct%adiabatic, do_adiabatic_init, flagstruct%do_inline_mp, &
                      inline_mp, flagstruct%c2l_ord, bd, flagstruct%fv_debug, &
                      flagstruct%moist_phys)
+
+     if(flagstruct%phys_dribble .and. present(vpa_dt) .and. .not. last_step)then
+#ifdef __GFORTRAN__
+!$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,zvir,q,q_con,sphum,liq_wat, &
+#else
+!$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,dp1,zvir,q,q_con,sphum,liq_wat, &
+#endif
+!$OMP                                  rainwat,ice_wat,snowwat,graupel,hailwat,pkz,flagstruct, &
+!$OMP                                  u,v,upd_dt,vpd_dt,tp_dt,qp_dt,mdt,q0,qt,qwat, &
+#ifdef MULTI_GASES
+!$OMP                                  kapad,                                          &
+#endif
+#ifdef __GFORTRAN__
+!$OMP                                  kappa,rdg,delp,pt,delz,nwat)                    &
+#else
+!$OMP                                  cappa,kappa,rdg,delp,pt,delz,nwat)              &
+#endif
+!$OMP                          private(cvm,i,j,k)
+
+
+! update winds with physics tendencies
+        do k=1,npz
+          do j=jsd,jed+1
+            do i=isd,ied
+              u(i,j,k) = u(i,j,k) + mdt*upd_dt(i,j,k)
+            enddo
+          enddo
+          do j=jsd,jed
+            do i=isd,ied+1
+              v(i,j,k) = v(i,j,k) + mdt*vpd_dt(i,j,k)
+            enddo
+          enddo
+        enddo
+        
+! convert theta_m to temperature
+        do k=1,npz
+          do j=js,je
+#ifdef USE_COND
+            call moist_cv(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                          ice_wat, snowwat, graupel, hailwat, q, q_con(is:ie,j,k), cvm)
+#endif
+            do i=is,ie
+              pt(i,j,k) = pt(i,j,k) * pkz(i,j,k)
+#ifdef MULTI_GASES
+              pt(i,j,k) = pt(i,j,k) / virq(q(i,j,k,:))
+#else
+              pt(i,j,k) = pt(i,j,k) / (1+zvir*q(i,j,k,1))
+#endif
+
+#ifdef USE_COND
+              pt(i,j,k) = pt(i,j,k) / (1.-q_con(i,j,k))
+#endif
+            enddo
+          enddo
+        enddo
+
+! update tracers with physics tendencies, conserve mass
+        do k=1,npz
+          do j=js,je
+            do i=is,ie
+              q0 = delp(i,j,k)*(1.0-sum(q(i,j,k,2:nwat)))
+              qwat(1:nq) = delp(i,j,k)*q(i,j,k,1:nq) + q0*mdt*qp_dt(i,j,k,1:nq)
+#ifdef MULTI_GASES
+              q0 = delp(i,j,k)*(1.-sum(q(i,j,k,1:max(nwat,num_gas)))) + sum(qwat(1:max(nwat,num_gas)))
+#else
+              qt = sum(qwat(1:nwat))
+              q0 = delp(i,j,k)*(1.-sum(q(i,j,k,1:nwat))) + qt
+#endif
+              delp(i,j,k) = q0
+              q(i,j,k,1:nq) = qwat(1:nq) / q0
+            enddo
+          enddo
+        enddo
+
+! update the temperature with physics tendencies
+        do k=1,npz
+          if ( hydrostatic ) then
+            do j=js,je
+              call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                            ice_wat, snowwat, graupel, hailwat, q, q_con(is:ie,j,k), cvm, pt(is:ie,j,k) )
+              do i=is,ie
+                pt(i,j,k) = pt(i,j,k) + tp_dt(i,j,k)*mdt*cp_air/cvm(i)
+              enddo
+            enddo
+          else
+            if ( flagstruct%phys_hydrostatic ) then
+              ! Constant pressure
+              do j=js,je
+                call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                              ice_wat, snowwat, graupel, hailwat, q, q_con(is:ie,j,k), cvm, pt(is:ie,j,k))
+                do i=is,ie
+                  delz(i,j,k) = delz(i,j,k) / pt(i,j,k)
+                  pt(i,j,k) = pt(i,j,k) + tp_dt(i,j,k)*mdt*cp_air/cvm(i)
+                  delz(i,j,k) = delz(i,j,k) * pt(i,j,k)
+                enddo
+              enddo
+            else
+              !NOTE: only works for either no physics or GFDL MP
+              if (nwat == 0) then
+                do j=js,je
+                  do i=is,ie
+                    pt(i,j,k) = pt(i,j,k) + tp_dt(i,j,k)*gama_dt
+                  enddo
+                enddo
+              else
+                do j=js,je
+                  call moist_cv(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                                ice_wat, snowwat, graupel, hailwat, q, q_con(is:ie,j,k), cvm, pt(is:ie,j,k))
+                  do i=is,ie
+                    pt(i,j,k) = pt(i,j,k) + tp_dt(i,j,k)*mdt*cp_air/cvm(i)
+                  enddo
+                enddo
+              endif
+            endif
+          endif
+        enddo
+
+! updated computation of exner function at center of volume in vertical
+        do k=1,npz
+          if ( flagstruct%moist_phys ) then
+            do j=js,je
+#ifdef MOIST_CAPPA
+              call moist_cv(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                            ice_wat, snowwat, graupel, hailwat, q, q_con(is:ie,j,k), cvm)
+#endif
+              do i=is,ie
+#ifdef MULTI_GASES
+                dp1(i,j,k) = virq(q(i,j,k,:))-1.
+                kapad(i,j,k)= kappa * (virqd(q(i,j,k,:))/vicpqd(q(i,j,k,:)))
+#else
+                dp1(i,j,k) = zvir*q(i,j,k,sphum)
+#endif
+    
+#ifdef MOIST_CAPPA
+                cappa(i,j,k) = rdgas/(rdgas + cvm(i)/(1.+dp1(i,j,k)))
+                pkz(i,j,k) = exp(cappa(i,j,k)*log(rdg*delp(i,j,k)*pt(i,j,k)*    &
+#ifdef USE_COND
+                             (1.+dp1(i,j,k))*(1.-q_con(i,j,k))/delz(i,j,k)) )
+#else
+                             (1.+dp1(i,j,k))                  /delz(i,j,k)) )
+#endif
+#else
+                pkz(i,j,k) = exp( kappa*log(rdg*delp(i,j,k)*pt(i,j,k)*    &
+                             (1.+dp1(i,j,k))/delz(i,j,k)) )
+    ! Using dry pressure for the definition of the virtual potential temperature
+    !              pkz(i,j,k) = exp( kappa*log(rdg*delp(i,j,k)*pt(i,j,k)*    &
+    !                                      (1.-q(i,j,k,sphum))/delz(i,j,k)) )
+#endif
+    
+              enddo
+            enddo
+          else
+            do j=js,je
+              do i=is,ie
+                dp1(i,j,k) = 0.
+#ifdef MULTI_GASES
+                kapad(i,j,k)= kappa * (virqd(q(i,j,k,:))/vicpqd(q(i,j,k,:)))
+                pkz(i,j,k) = exp(kapad(i,j,k)*log(rdg*virqd(q(i,j,k,:))*delp(i,j,k)*pt(i,j,k)/delz(i,j,k)))
+#else
+                pkz(i,j,k) = exp(kappa*log(rdg*delp(i,j,k)*pt(i,j,k)/delz(i,j,k)))
+#endif
+              enddo
+           enddo
+         endif
+
+! convert temperature to theta_m
+         do j=js,je
+           do i=is,ie
+#ifdef MULTI_GASES
+             pt(i,j,k) = pt(i,j,k) * virq(q(i,j,k,:))
+#else
+             pt(i,j,k) = pt(i,j,k) * (1+zvir*q(i,j,k,1))
+#endif
+
+#ifdef USE_COND
+             pt(i,j,k) = pt(i,j,k) * (1.-q_con(i,j,k))
+#endif
+             pt(i,j,k) = pt(i,j,k) / pkz(i,j,k)
+           enddo
+         enddo
+       enddo
+     endif
 
      if ( flagstruct%molecular_diffusion ) then
 ! do thermosphere adjustment if it is turned on and at last_step.

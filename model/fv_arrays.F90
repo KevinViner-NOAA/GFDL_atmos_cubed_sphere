@@ -849,6 +849,10 @@ module fv_arrays_mod
                                           !< balance, causing the entire atmospheric column to expand instantaneously.
                                           !< If .false., heating from the physics is applied simply as a temperature
                                           !< tendency. The default value is .true.; ignored if hydrostatic = .true.
+   logical :: phys_dribble = .false.   !< Option to apply physics tendencies
+                                       !< after each remapping step rather than as a single tendency after the physics is
+                                       !< run
+                                       !< 
    logical :: use_hydro_pressure = .false.   !< Whether to compute hydrostatic pressure for input to the physics.
                                              !< Currently only enabled for the fvGFS model.
                                              !< Ignored in hydrostatic simulations. The default is .false.
