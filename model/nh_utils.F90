@@ -50,9 +50,9 @@ module nh_utils_mod
 ! </table>
 
 #ifdef OVERLOAD_R4
-   use constantsR4_mod,     only: rdgas, cp_air, grav
+   use constantsR4_mod,     only: rdgas, cp_air, grav, pi
 #else
-   use constants_mod,     only: rdgas, cp_air, grav
+   use constants_mod,     only: rdgas, cp_air, grav, pi
 #endif
    use tp_core_mod,       only: fv_tp_2d
    use sw_core_mod,       only: fill_4corners, del6_vt_flux
@@ -346,11 +346,12 @@ CONTAINS
                            kapad, &
 #endif
                            ptop, hs, w3,  pt, q_con, &
-                           delp, gz,  pef,  ws, p_fac, a_imp, scale_m)
+                           delp, gz,  pef,  ws, p_fac, a_imp, scale_m, &
+                           rf_cutoff, tau_nh)
 
    integer, intent(in):: is, ie, js, je, ng, km
    integer, intent(in):: ms
-   real, intent(in):: dt,  akap, cp, ptop, p_fac, a_imp, scale_m
+   real, intent(in):: dt, akap, cp, ptop, p_fac, a_imp, scale_m, rf_cutoff, tau_nh
    real, intent(in):: ws(is-ng:ie+ng,js-ng:je+ng)
    real, intent(in), dimension(is-ng:ie+ng,js-ng:je+ng,km):: pt, delp
    real, intent(in), dimension(is-ng:,js-ng:,1:):: q_con, cappa
@@ -378,7 +379,7 @@ CONTAINS
    is1 = is - 1
    ie1 = ie + 1
 
-!$OMP parallel do default(none) shared(js,je,is1,ie1,km,delp,pef,ptop,gz,rgrav,w3,pt, &
+!$OMP parallel do default(none) shared(js,je,is1,ie1,km,delp,pef,ptop,gz,rgrav,w3,pt,rf_cutoff,tau_nh, &
 #ifdef MULTI_GASES
 !$OMP                                  a_imp,dt,gama,akap,ws,p_fac,scale_m,ms,hs,q_con,cappa,kapad) &
 !$OMP                          private(cp2,gm2, dm, dz2, w2, pm2, pe2, pem, peg, kapad2)
@@ -441,7 +442,8 @@ CONTAINS
                               kapad2, &
 #endif
                               pe2, dm, &
-                              pem, w2, dz2, pt(is1:ie1,j,1:km), ws(is1,j), p_fac, scale_m)
+                              pem, w2, dz2, pt(is1:ie1,j,1:km), ws(is1,j), p_fac, scale_m, &
+                              rf_cutoff, tau_nh)
       elseif ( a_imp <= 0.5 ) then
            call RIM_2D(ms, dt, is1, ie1, km, rdgas, gama, gm2, &
 #ifdef MULTI_GASES
@@ -455,7 +457,8 @@ CONTAINS
                             kapad2, &
 #endif
                             pe2,  &
-                            dm, pm2, pem, w2, dz2, pt(is1:ie1,j,1:km), ws(is1,j), p_fac)
+                            dm, pm2, pem, w2, dz2, pt(is1:ie1,j,1:km), ws(is1,j), p_fac, &
+                            rf_cutoff, tau_nh)
       endif
 
       do k=2,km+1
@@ -490,7 +493,7 @@ CONTAINS
                           ptop, zs, q_con, w,  delz, pt,  &
                           delp, zh, pe, ppe, pk3, pk, peln, &
                           ws, scale_m,  p_fac, a_imp, &
-                          use_logp, last_call, fp_out)
+                          use_logp, last_call, fp_out, rf_cutoff, tau_nh)
 !--------------------------------------------
 ! !OUTPUT PARAMETERS
 ! Ouput: gz: grav*height at edges
@@ -500,7 +503,7 @@ CONTAINS
    integer, intent(in):: ms, is, ie, js, je, km, ng
    integer, intent(in):: isd, ied, jsd, jed
    real, intent(in):: dt         ! the BIG horizontal Lagrangian time step
-   real, intent(in):: akap, cp, ptop, p_fac, a_imp, scale_m
+   real, intent(in):: akap, cp, ptop, p_fac, a_imp, scale_m, rf_cutoff, tau_nh
    real, intent(in):: zs(isd:ied,jsd:jed)
    logical, intent(in):: last_call, use_logp, fp_out
    real, intent(in):: ws(is:ie,js:je)
@@ -532,7 +535,7 @@ CONTAINS
      ptk = exp(akap*peln1)
 
 !$OMP parallel do default(none) shared(is,ie,js,je,km,delp,ptop,peln1,pk3,ptk,akap,rgrav,zh,pt, &
-!$OMP                                  w,a_imp,dt,gama,ws,p_fac,scale_m,ms,delz,last_call,  &
+!$OMP                                  w,a_imp,dt,gama,ws,p_fac,scale_m,ms,delz,last_call,rf_cutoff,tau_nh, &
 #ifdef MULTI_GASES
 !$OMP                                  peln,pk,fp_out,ppe,use_logp,zs,pe,cappa,q_con,kapad )          &
 !$OMP                          private(cp2, gm2, dm, dz2, pm2, pem, peg, pelng, pe2, peln2, w2,kapad2)
@@ -601,14 +604,16 @@ CONTAINS
                               kapad2, &
 #endif
                               pe2, dm,  &
-                              pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), p_fac, scale_m )
+                              pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), p_fac, scale_m, &
+                              rf_cutoff, tau_nh )
       elseif ( a_imp < -0.5 ) then
            call SIM3_solver(dt, is, ie, km, rdgas, gama, akap, &
 #ifdef MULTI_GASES
                         kapad2, &
 #endif
                         pe2, dm,   &
-                        pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), abs(a_imp), p_fac, scale_m)
+                        pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), abs(a_imp), p_fac, scale_m, &
+                        rf_cutoff, tau_nh)
       elseif ( a_imp <= 0.5 ) then
            call RIM_2D(ms, dt, is, ie, km, rdgas, gama, gm2, &
 #ifdef MULTI_GASES
@@ -622,7 +627,8 @@ CONTAINS
                             kapad2, &
 #endif
                             pe2, dm,   &
-                            pm2, pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), p_fac)
+                            pm2, pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), p_fac, &
+                            rf_cutoff, tau_nh)
       else
            call SIM_solver(dt, is, ie, km, rdgas, gama, gm2, cp2, akap, &
 #ifdef MULTI_GASES
@@ -630,7 +636,7 @@ CONTAINS
 #endif
                            pe2, dm,  &
                            pm2, pem, w2, dz2, pt(is:ie,j,1:km), ws(is,j), &
-                           a_imp, p_fac, scale_m)
+                           a_imp, p_fac, scale_m, rf_cutoff, tau_nh)
       endif
 
       do k=1, km
@@ -1018,9 +1024,10 @@ CONTAINS
                         kapad2, &
 #endif
                         pe2, dm,   &
-                        pem, w2, dz2, pt2, ws, alpha, p_fac, scale_m)
+                        pem, w2, dz2, pt2, ws, alpha, p_fac, scale_m, &
+                        rf_cutoff, tau_nh)
    integer, intent(in):: is, ie, km
-   real, intent(in):: dt, rgas, gama, kappa, alpha, p_fac, scale_m
+   real, intent(in):: dt, rgas, gama, kappa, alpha, p_fac, scale_m, rf_cutoff, tau_nh
    real, intent(in   ), dimension(is:ie,km):: dm, pt2
    real, intent(in )::  ws(is:ie)
    real, intent(in ), dimension(is:ie,km+1):: pem
@@ -1033,7 +1040,7 @@ CONTAINS
    real, dimension(is:ie,km  ):: aa, bb, dd, w1, wk, g_rat, gam
    real, dimension(is:ie,km+1):: pp
    real, dimension(is:ie):: p1, wk1, bet
-   real  beta, t2, t1g, rdt, ra, capa1, r2g, r6g
+   real  beta, t2, t1g, rdt, ra, capa1, r2g, r6g, pfull, rff
 #ifdef MULTI_GASES
    real  gamax, capa1x, t1gx
 #endif
@@ -1147,6 +1154,24 @@ CONTAINS
       enddo
     enddo
 
+    if(tau_nh>0.)then
+      do k=1,km
+        do i=is,ie
+! Full pressure at center
+#ifdef MULTI_GASES
+          gamax = 1. / (1.-kapad2(i,k))
+          pfull = exp(gamax*log(-dm(i,k)/dz2(i,k)*rgas*pt2(i,k)))
+#else
+          pfull = exp(gama*log(-dm(i,k)/dz2(i,k)*rgas*pt2(i,k)))
+#endif
+          if(pfull<rf_cutoff)then
+            rff = (abs(dt)/tau_nh)*sin(0.5*pi*log(rf_cutoff/pfull)/log(rf_cutoff/pem(i,1)))**2
+            w2(i,k) = w2(i,k)/(1. + rff)
+          endif
+        enddo
+      enddo
+    end if
+
 ! pe2 is updated perturbation p at edges
     do i=is, ie
        pe2(i,1) = 0.
@@ -1205,10 +1230,11 @@ CONTAINS
                           kapad2, &
 #endif
                           pe2, dm, &
-                          pem, w2, dz2, pt2, ws, p_fac, scale_m)
+                          pem, w2, dz2, pt2, ws, p_fac, scale_m, &
+                          rf_cutoff, tau_nh)
 ! Sa SIM3, but for beta==0
    integer, intent(in):: is, ie, km
-   real, intent(in):: dt, rgas, gama, kappa, p_fac, scale_m
+   real, intent(in):: dt, rgas, gama, kappa, p_fac, scale_m, rf_cutoff, tau_nh
    real, intent(in   ), dimension(is:ie,km):: dm, pt2
    real, intent(in )::  ws(is:ie)
    real, intent(in ):: pem(is:ie,km+1)
@@ -1221,7 +1247,7 @@ CONTAINS
    real, dimension(is:ie,km  ):: aa, bb, dd, w1, g_rat, gam
    real, dimension(is:ie,km+1):: pp
    real, dimension(is:ie):: p1, wk1, bet
-   real  t1g, rdt, capa1, r2g, r6g
+   real  t1g, rdt, capa1, r2g, r6g, pfull, rff
 #ifdef MULTI_GASES
    real  gamax, capa1x, t1gx
 #endif
@@ -1328,6 +1354,24 @@ CONTAINS
       enddo
     enddo
 
+    if(tau_nh>0.)then
+      do k=1,km
+        do i=is,ie
+! Full pressure at center
+#ifdef MULTI_GASES
+          gamax = 1. / ( 1. - kapad2(i,k) )
+          pfull = exp(gamax*log(-dm(i,k)/dz2(i,k)*rgas*pt2(i,k)))
+#else
+          pfull = exp(gama*log(-dm(i,k)/dz2(i,k)*rgas*pt2(i,k)))
+#endif
+          if(pfull<rf_cutoff)then
+            rff = (abs(dt)/tau_nh)*sin(0.5*pi*log(rf_cutoff/pfull)/log(rf_cutoff/pem(i,1)))**2
+            w2(i,k) = w2(i,k)/(1. + rff)
+          endif
+        enddo
+      enddo
+    end if
+
 ! pe2 is updated perturbation p at edges
     do i=is, ie
        pe2(i,1) = 0.
@@ -1385,9 +1429,9 @@ CONTAINS
                         kapad2, &
 #endif
                         pe, dm2,   &
-                        pm2, pem, w2, dz2, pt2, ws, p_fac)
+                        pm2, pem, w2, dz2, pt2, ws, p_fac, rf_cutoff, tau_nh)
    integer, intent(in):: is, ie, km
-   real,    intent(in):: dt, rgas, gama, kappa, p_fac
+   real,    intent(in):: dt, rgas, gama, kappa, p_fac, rf_cutoff, tau_nh
    real, intent(in), dimension(is:ie,km):: dm2, pt2, pm2, gm2, cp2
    real, intent(in )::  ws(is:ie)
    real, intent(in ), dimension(is:ie,km+1):: pem
@@ -1400,7 +1444,7 @@ CONTAINS
    real, dimension(is:ie,km  ):: aa, bb, dd, w1, g_rat, gam
    real, dimension(is:ie,km+1):: pp
    real, dimension(is:ie):: p1, bet
-   real t1g, rdt, capa1
+   real t1g, rdt, capa1, pfull, rff
 #ifdef MULTI_GASES
    real  gamax, capa1x, t1gx
 #endif
@@ -1509,6 +1553,18 @@ CONTAINS
        enddo
     enddo
 
+    if(tau_nh>0.)then
+      do k=1,km
+        do i=is,ie
+          pfull = pe(i,k) + pm2(i,k)
+          if(pfull<rf_cutoff)then
+            rff = (abs(dt)/tau_nh)*sin(0.5*pi*log(rf_cutoff/pfull)/log(rf_cutoff/pem(i,1)))**2
+            w2(i,k) = w2(i,k)/(1. + rff)
+          endif
+        enddo
+      enddo
+    end if
+
     do i=is, ie
        pe(i,1) = 0.
     enddo
@@ -1556,9 +1612,11 @@ CONTAINS
                        kapad2, &
 #endif
                        pe2, dm2,   &
-                       pm2, pem, w2, dz2, pt2, ws, alpha, p_fac, scale_m)
+                       pm2, pem, w2, dz2, pt2, ws, alpha, p_fac, scale_m, &
+                       rf_cutoff, tau_nh)
+
    integer, intent(in):: is, ie, km
-   real, intent(in):: dt, rgas, gama, kappa, p_fac, alpha, scale_m
+   real, intent(in):: dt, rgas, gama, kappa, p_fac, alpha, scale_m, rf_cutoff, tau_nh
    real, intent(in), dimension(is:ie,km):: dm2, pt2, pm2, gm2, cp2
    real, intent(in )::  ws(is:ie)
    real, intent(in ), dimension(is:ie,km+1):: pem
@@ -1571,7 +1629,7 @@ CONTAINS
    real, dimension(is:ie,km  ):: aa, bb, dd, w1, wk, g_rat, gam
    real, dimension(is:ie,km+1):: pp
    real, dimension(is:ie):: p1, wk1, bet
-   real  beta, t2, t1g, rdt, ra, capa1
+   real  beta, t2, t1g, rdt, ra, capa1, pfull, rff
 #ifdef MULTI_GASES
    real  gamax, capa1x, t1gx
 #endif
@@ -1696,6 +1754,18 @@ CONTAINS
          w2(i,k) = w2(i,k) - gam(i,k+1)*w2(i,k+1)
       enddo
     enddo
+
+    if(tau_nh>0.)then
+      do k=1,km
+        do i=is,ie
+          pfull = pe2(i,k) + pm2(i,k)
+          if(pfull<rf_cutoff)then
+            rff = (abs(dt)/tau_nh)*sin(0.5*pi*log(rf_cutoff/pfull)/log(rf_cutoff/pem(i,1)))**2
+            w2(i,k) = w2(i,k)/(1. + rff)
+          endif
+        enddo
+      enddo
+    end if
 
     do i=is, ie
        pe2(i,1) = 0.

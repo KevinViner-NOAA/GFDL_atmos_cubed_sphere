@@ -697,6 +697,9 @@ module fv_arrays_mod
                          !< jets; for higher-top hydrostatic models values between 5 and 15 should be
                          !< considered; and for non-hydrostatic models values of 10 or less should be
                          !< considered, with smaller values for higher-resolution.
+   real    :: tau_nh = 0.0  !< Time scale (in seconds) for Rayleigh damping
+                            !< applied to vertical velocity for nonhydrostatic cases. When nonzero should have
+                            !< tau=0.0
    real    :: rf_cutoff = 30.E2   !< Pressure below which no Rayleigh damping is applied if tau > 0.
    logical :: filter_phys = .false.
    logical :: dwind_2d = .false.   !< Whether to use a simpler & faster algorithm for interpolating
